@@ -16,6 +16,7 @@ import java.util.List;
  * Created by liujinjing on 2017/7/13.
  */
 public abstract class ConcurrentlyConsumer<T> extends AbstractConsumer implements MessageListenerConcurrently {
+
     private final static Logger logger = LoggerFactory.getLogger(ConcurrentlyConsumer.class);
 
     public MessageListener getConsumer() {
@@ -28,6 +29,7 @@ public abstract class ConcurrentlyConsumer<T> extends AbstractConsumer implement
         logger.info("received message >>>\n{}", msg);
 
         if (isDuplicateMessage(msg)) {
+            logger.warn("Have already been consumed and is not RETRY message, skip it.\n{}", msg);
             return ConsumeConcurrentlyStatus.CONSUME_SUCCESS;
         }
 

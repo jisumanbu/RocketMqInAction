@@ -15,7 +15,8 @@ import java.util.List;
 /**
  * Created by liujinjing on 2017/7/19.
  */
-public abstract class OrderlyConsumer<T> extends AbstractConsumer implements MessageListenerOrderly{
+public abstract class OrderlyConsumer<T> extends AbstractConsumer implements MessageListenerOrderly {
+
     private final static Logger logger = LoggerFactory.getLogger(OrderlyConsumer.class);
 
     public MessageListener getConsumer() {

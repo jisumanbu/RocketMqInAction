@@ -12,21 +12,24 @@ import org.slf4j.LoggerFactory;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
+
 /**
  * Created by liujinjing on 2017/6/1.
  * <p>
  * Concrete consumer listener must provide group/topic, tags
  */
 public abstract class AbstractConsumer {
+
     private final static Logger logger = LoggerFactory.getLogger(AbstractConsumer.class);
 
     public DefaultMQPushConsumer consumer = new DefaultMQPushConsumer();
+
     {
         consumer.setConsumerGroup(getConsumerGroup());
         consumer.setNamesrvAddr("localhost:9876");
         consumer.setInstanceName(getInstanceName());
 
-        /**
+        /*
          *  Note, ConsumeFromWhere
          *      CONSUME_FROM_LAST_OFFSET  -> 默认策略，从该队列最尾开始消费，即跳过历史消息
          *      CONSUME_FROM_FIRST_OFFSET -> 从队列最开始开始消费，即历史消息（还储存在broker的）全部消费一遍
@@ -59,22 +62,23 @@ public abstract class AbstractConsumer {
         }));
     }
 
-    public String getInstanceName() {
+    private String getInstanceName() {
         return getConsumerGroup() + "_" + getTopic() + "_" + getTags() + "_" + UUID.randomUUID().toString();
     }
 
     /**
-     * insert key into Redis, already exists then we can tell that this message is received by other consumer instance.
+     * insert key into Redis, if already exists then we can tell that this message is received by other consumer instance.
+     *
      * @param messageKey
      * @return
      */
     public static boolean isAlreadyConsumed(String topic, String tags, String messageKey) {
         String hashKeyOfRedis = topic + "_" + tags;
-        String subKey = messageKey;
 
         boolean isAlreadyConsumed = false;
         try {
-//            isAlreadyConsumed = !edisClient.getClient().getSetCache(hashKeyOfRedis).add(subKey, 1L, TimeUnit.DAYS);
+            //FIXME 注意：FedisClient为未实现单例，用户得自行修复以上代码。
+            isAlreadyConsumed = !FedisClient.getClient().getSetCache(hashKeyOfRedis).add(messageKey, 1L, TimeUnit.DAYS);
         } catch (Exception e) {
             //if any exception, take default value: isAlreadyConsumed = false;
             logger.error("Met [{}] when check one message if isAlreadyConsumed, we have a risk consuming duplicate message ....", e.getMessage());
@@ -84,8 +88,8 @@ public abstract class AbstractConsumer {
 
     public MessageModel getMessageModel() {
         return MessageModel.CLUSTERING;
-
     }
+
     public abstract MessageListener getConsumer();
 
     public abstract String getConsumerGroup();
@@ -94,11 +98,9 @@ public abstract class AbstractConsumer {
 
     public abstract String getTags();
 
-
     //if message is from %RETRY% topic -> re-consume
     //if isn't from %RETRY% topic, skip duplicate message.
     public boolean isDuplicateMessage(MessageExt msg) {
-        logger.warn("Have already been consumed and is not RETRY message, skip it.\n{}", msg);
         return notFromRetryTopic(msg) && AbstractConsumer.isAlreadyConsumed(msg.getTopic(), msg.getTags(), msg.getKeys());
     }
 

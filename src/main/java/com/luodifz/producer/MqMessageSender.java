@@ -20,10 +20,63 @@ import java.io.UnsupportedEncodingException;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Created by liujinjing on 2017/6/1.
+ * <p>
+ * <dl>
+ *     <dt>主要发送方式
+ *         <dd>同步发送、异步发送 -> send、sendAsyn</dd>
+ *         <dd>顺序发送（接受者/ consumer也必须是按顺序接收） -> *Orderly</dd>
+ *         <dd>延迟发送 -> *Delayed</dd>
+ * <p>
+ * <dt>sender自动失败重试，如果最终还是发送失败，理应保存数据一面数据丢失
+ *      <dd>sender实现了retry，client没有必要retry
+ *          <ol>
+ *              <li>defaultSendingTimeout = 3000 mills</li>
+ *              <li>retryTimesWhenSendFailed = 2</li>
+ *          </ol>
+ *      </dd>
+ *      <dd>如果发送失败，确保消息不丢失（未实现）
+ *      <ol>
+ *          <li>MqMessageSender会保存消息到DB，同时抛出unCheckedException</li>
+ *          <li>应用程序接收到Exception后应该终止运行</li>
+ *          <li>检查后重启，可以从DB中重新发送</li>
+ *      </ol>
+ *      </dd>
+ * </dt>
+ * <p>
+ * <dt>producerGroup
+ *      <dd>one producerGroup per application as default
+ *      </dd>
+ *      <dd>producerGroup用来表示一个发送消息应用
+ *      </dd>
+ * <dd>
+ * 一个 Producer Group 下包含多个 Producer 实例，可以是多台机器，
+ * 也可以是一台机器的多个进程，或者一个进程的多个 Producer 对象。
+ * </dd>
+ * <dd>
+ * 一个 Producer Group 可以发送多个 Topic 消息.
+ * </dd>
+ * <dd>Producer Group 作用如下:
+ *      <ul>
+ *          <li>标识一类 Producer</li>
+ *          <li>可以通过运维工具查询这个发送消息应用下有多个 Producer 实例</li>
+ *          <li>发送分布式事务消息时，如果 Producer 中途意外宕机，Broker 会主动回调 Producer Group 内的任意一台机器来确认事务状态。</li>
+ *      </ul>
+ * </dd>
+ * </dt>
+ * <p>
+ * <dt>consumer Group
+ * </dt>
+ * <p>
+ * <p>
+ * </dl>
+ */
 public class MqMessageSender {
+
     private final static Logger logger = LoggerFactory.getLogger(MqMessageSender.class);
 
-    public final static DefaultMQProducer producer;
+    private final static DefaultMQProducer producer;
 
     static {
         //FIXME, take projectName as producerGroup
@@ -39,6 +92,7 @@ public class MqMessageSender {
 
         //add shutdown hook
         Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
+            @Override
             public void run() {
                 producer.shutdown();
             }
@@ -49,22 +103,16 @@ public class MqMessageSender {
         producer.shutdown();
     }
 
-    public static <T extends AbstractObjectMessage> SendResult sendObjectMsg(String topic, String tags, T objectMessage) throws
-            Exception {
-        String messageKey = objectMessage.getKey();
-        String msgContent = JsonUtil.toJson(objectMessage);
-        return sendMsg(topic, tags, messageKey, msgContent);
-    }
-
     /**
      * Send message synchronized.
-     *
+     * <p>
      * if sendResult.getSendStatus() != SEND_OK || exception -> fail
-     *
-     * TODO, maxMessageSize
-     *
+     * <p>
+     * TODO:
+     *  1. check maxMessageSize
+     *  2. if failed to send message, save message into DB before exit in case lost data
      */
-    public static SendResult sendMsg(String topic, String tags, String messageKey, String msgContent) throws Exception {
+    public static SendResult send(String topic, String tags, String messageKey, String msgContent) throws Exception {
         SendResult sendResult = null;
 
         try {
@@ -84,21 +132,6 @@ public class MqMessageSender {
     }
 
     /**
-     * @param topic
-     * @param tags
-     * @param objectMessage -> subClass of AbstractObjectMessage
-     * @param sendCallback  -> default : DefaultSendCallback
-     */
-    public static <T extends AbstractObjectMessage> void sendObjectMsgAsyn(String topic, String tags, T objectMessage, SendCallback sendCallback) {
-        String key = objectMessage.getKey();
-        String msgContent = JsonUtil.toJson(objectMessage);
-        sendAsyn(topic, tags, key, msgContent, sendCallback);
-    }
-
-
-    //have not finished designing yet, so do not use it now.
-
-    /**
      * How to deal success results and exceptions
      *
      * @param topic
@@ -110,6 +143,18 @@ public class MqMessageSender {
      */
     public static void sendAsyn(String topic, String tags, String key, String msgContent, SendCallback sendCallback) {
         sendAsynDelayed(topic, tags, key, msgContent, sendCallback, 0);
+    }
+
+    /**
+     * @param topic
+     * @param tags
+     * @param objectMessage -> subClass of AbstractObjectMessage
+     * @param sendCallback  -> default : DefaultSendCallback
+     */
+    public static <T extends AbstractObjectMessage> void sendObjectAsyn(String topic, String tags, T objectMessage, SendCallback sendCallback) {
+        String key = objectMessage.getKey();
+        String msgContent = JsonUtil.toJson(objectMessage);
+        sendAsyn(topic, tags, key, msgContent, sendCallback);
     }
 
     public static void sendAsynDelayed(String topic, String tags, String key, String msgContent, SendCallback sendCallback, int delayTimeLevel) {
@@ -141,7 +186,7 @@ public class MqMessageSender {
         }
     }
 
-    public static SendResult sendMsgOrderly(String topic, String tags, String key, String msgContent) throws Exception {
+    public static SendResult sendOrderly(String topic, String tags, String key, String msgContent) throws Exception {
 
         Message msg = new Message(topic,
                 tags,
@@ -156,6 +201,7 @@ public class MqMessageSender {
              *  1. same tags, should be always in same queue
              *  2. different tags can be in same queue
              */
+            @Override
             public MessageQueue select(List<MessageQueue> mqs, Message msg, Object queueIndexSeed) {
                 int hashcode = queueIndexSeed.hashCode();
                 int queueIndex = hashcode % mqs.size();
@@ -183,6 +229,7 @@ public class MqMessageSender {
              *  1. same tags, should be always in same queue
              *  2. different tags can be in same queue
              */
+            @Override
             public MessageQueue select(List<MessageQueue> mqs, Message msg, Object queueIndexSeed) {
                 int hashcode = queueIndexSeed.hashCode();
                 int queueIndex = hashcode % mqs.size();
